@@ -1,7 +1,7 @@
 #include "FastLED.h"
 #include <math.h>
 
-#define DEBUG
+//#define DEBUG
 /*
  *  Comment the line above out, if debugging and the color finding process is done.
  *  With debugging, the code includes a serial output for the for heatIndices and 
@@ -11,7 +11,7 @@
  */
 
 // How many leds in your strip?
-#define NUM_LEDS 50
+#define NUM_LEDS 48
 
 // For led chips like Neopixels, which have a data line, ground, and power, you just
 // need to define DATA_PIN.  For led chipsets that are SPI based (four wires - data, clock,
@@ -50,20 +50,8 @@ static boolean boolThunderstorm;
 // Define the array of leds
 CRGB leds[NUM_LEDS];
 
-DEFINE_GRADIENT_PALETTE( manualSunrise ) {
-    0,  34, 35, 61,
-   28,  55, 31, 61,
-   57, 123, 31, 49,
-   70, 172, 27, 50,
-  100, 201, 65, 65,
-  139, 238,103, 74,
-  170, 244,157, 97,
-  199, 245,202,104,
-  227, 250,233,173,
-  255, 255,239,231}; //alt
-
 //color palette for the sunrise and the sunset (backwards).
-DEFINE_GRADIENT_PALETTE( sunrise2 ) {
+DEFINE_GRADIENT_PALETTE( palSunriseSunset ) {
     0,  34, 35, 61,
    28,  55, 31, 61,
    57, 110, 33, 43,
@@ -72,22 +60,22 @@ DEFINE_GRADIENT_PALETTE( sunrise2 ) {
   139, 200, 76, 63,
   170, 210, 85, 87,
   199, 230,100,104,
-  227, 250,160,173,
-  255, 251,180,183};
+  227, 250,133,130,
+  255, 251,145,142};
 
 //color palette for the daylight.
 DEFINE_GRADIENT_PALETTE( palDaylight ) {
-    0, 251, 180, 183,
-   26, 251, 190, 195,
-   52, 253, 210, 208,
-   77, 250, 200, 199,
-  103, 253, 215, 220,
+    0, 251, 145, 142,
+   26, 251, 160, 155,
+   52, 253, 190, 188,
+   77, 250, 200, 193,
+  103, 253, 215, 212,
   128, 255, 239, 231,
   153, 255, 230, 220,
   178, 253, 216, 205,
-  204, 250, 195, 203,
-  229, 252, 190, 191,
-  255, 251, 180, 183};
+  204, 250, 191, 183,
+  229, 252, 163, 161,
+  255, 251, 145, 142};
 
 //color palette for the night.
 DEFINE_GRADIENT_PALETTE( palNight ) {
@@ -103,7 +91,7 @@ DEFINE_GRADIENT_PALETTE( palNight ) {
   229, 30, 32, 50,
   255, 34, 35, 61};
 
-  //color palette for the sunrise and the sunset (backwards).
+  //color palette for the thunderstorm (backwards).
 DEFINE_GRADIENT_PALETTE( palThunderstorm ) {
     0,  34, 35, 61,
    28,  55, 31, 61,
@@ -112,10 +100,9 @@ DEFINE_GRADIENT_PALETTE( palThunderstorm ) {
   100, 135, 63, 71,
   139, 165, 81, 87,
   170, 185, 95,111,
-  199, 210,120,142,
-  227, 230,155,176,
-  255, 251,180,183};
-
+  199, 210,120,138,
+  227, 230,134,140,
+  255, 251,145,142};
 
 void setup() { 
       // Uncomment/edit one of the following lines for your leds arrangement.
@@ -344,7 +331,7 @@ void daylight() {
 void sunset() {
 
   //current color palette
-  CRGBPalette16 myPal = sunrise2;
+  CRGBPalette16 myPal = palSunriseSunset;
 
   // fill the entire strip with the current color
   fill_solid(leds, NUM_LEDS, ColorFromPalette( myPal, (heatIndexSunset - 1)));
@@ -377,25 +364,8 @@ void sunset() {
 }
 
 void sunrise() {
-  
-  // total sunrise length, in minutes
-  static const uint8_t sunriseLength = 256/60; //3*256/60;
 
-  // how often (in seconds) should the heat color increase?
-  // for the default of 30 minutes, this should be about every 7 seconds
-  // 7 seconds x 256 gradient steps = 1,792 seconds = ~30 minutes
-  //static const uint8_t intervalSunriseSunset = 1; //(sunriseLength * 60) / 256;
-
-  // current gradient palette color index
-  //0 für Sonnenaufgang und 240 für Sonnenuntergang
-  //static uint8_t heatIndexSunrise = 240; // start out at 0
-  
-  // HeatColors_p is a gradient palette built in to FastLED
-  // that fades from black to red, orange, yellow, white
-  // feel free to use another palette or define your own custom one
-  //CRGB color = ColorFromPalette(Sunset_Real_gp, heatIndex);
-
-  CRGBPalette16 myPal = sunrise2;
+  CRGBPalette16 myPal = palSunriseSunset;
   
   // fill the entire strip with the current color
   fill_solid(leds, NUM_LEDS, ColorFromPalette( myPal, heatIndexSunrise));
