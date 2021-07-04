@@ -1,0 +1,523 @@
+#include "FastLED.h"
+#include <math.h>
+
+//#define DEBUG
+/*
+ *  Comment the line above out, if debugging and the color finding process is done.
+ *  With debugging, the code includes a serial output for the for heatIndices and 
+ *  boolThunderstorm which is triggered by an interrupt function.
+ *  It also includes a short time where all the lights are off, to mark the transition 
+ *  between the four functions.
+ */
+
+// How many leds in your strip?
+#define NUM_LEDS 81
+
+// For led chips like Neopixels, which have a data line, ground, and power, you just
+// need to define DATA_PIN.  For led chipsets that are SPI based (four wires - data, clock,
+// ground, and power), like the LPD8806 define both DATA_PIN and CLOCK_PIN
+#define DATA_PIN 4
+#define CLOCK_PIN 13
+
+#define MIN_BRIGHTNESS 20
+#define MIN_BRIGHTNESS_SUNRISE_SUNSET 50
+#define MAX_BRIGHTNESS_SUNRISE_SUNSET 205
+#define MAX_BRIGHTNESS 255
+
+static uint8_t sunriseSunsetBrightness;
+static uint8_t daylightBrightness;
+static uint8_t nightBrightness;
+
+uint8_t brightness;
+
+//length of sunrise, daylight, sunset and night in minutes.
+static const uint16_t sunriseSunsetLength = 4;
+static const uint16_t daylightLength = 12;
+static const uint16_t nightLength = 6;
+
+static uint16_t intervalSunriseSunset;
+static uint16_t intervalDaylight;
+static uint16_t intervalNight;
+
+static uint8_t heatIndexSunrise = 0;
+static uint8_t heatIndexDaylight = 0;
+static uint8_t heatIndexSunset = 0;
+static uint8_t heatIndexNight = 0;
+
+#define THUNDERSTORM_PIN 2
+static boolean boolThunderstorm;
+#define LED_THUNDERSTORM 6
+
+// This interrupt is used to keep the scene in an eternal daylight or night loop.
+#define ETERNAL_PIN 3
+static boolean boolEternal;
+#define LED_ETERNAL 7
+
+// These variables are used for an additional warm-white LED strip, to make the daylight
+// look more realistic.
+#define WARMWHITE_PIN 9
+
+#define MIN_WARMWHITE 0
+#define CHANGE_WARMWHITE 50
+#define MAX_WARMWHITE 190
+float currentWarmwhite = 0;
+
+// The warmwhite LED strip should turn on after 75 % of the duration of the sunrise.
+// It will turn off after 25 % of the the duration of sunset. In case of a thunderstorm,
+// the length is reduced to half of that time.
+static const float cutoffWarmwhite = 0.25;
+static uint16_t lengthWarmwhite;
+
+// Define the array of leds
+CRGB leds[NUM_LEDS];
+
+//color palette for the sunrise and the sunset (backwards).
+DEFINE_GRADIENT_PALETTE( palSunriseSunset ) {
+    0,  34, 35, 61,
+   28,  55, 31, 61,
+   57, 110, 33, 43,
+   70, 172, 48, 46,
+  100, 185, 60, 51,
+  139, 200, 76, 63,
+  170, 210, 85, 87,
+  199, 230,100,104,
+  227, 250,133,130,
+  255, 251,145,142};
+
+//color palette for the daylight.
+DEFINE_GRADIENT_PALETTE( palDaylight ) {
+    0, 251, 145, 142,
+   26, 251, 160, 155,
+   52, 253, 190, 188,
+   77, 250, 200, 193,
+  103, 253, 215, 212,
+  128, 255, 239, 231,
+  153, 255, 230, 220,
+  178, 253, 216, 205,
+  204, 250, 191, 183,
+  229, 252, 163, 161,
+  255, 251, 145, 142};
+
+//color palette for the night.
+DEFINE_GRADIENT_PALETTE( palNight ) {
+    0, 34, 35, 61,
+   26, 30, 34, 55,
+   52, 31, 31, 50,
+   77, 25, 28, 46,
+  103, 23, 27, 38,
+  128, 20, 24, 30,
+  153, 22, 28, 33,
+  178, 23, 31, 40,
+  204, 28, 31, 42,
+  229, 30, 32, 50,
+  255, 34, 35, 61};
+
+  //color palette for the thunderstorm (backwards).
+DEFINE_GRADIENT_PALETTE( palThunderstorm ) {
+    0,  34, 35, 61,
+   28,  55, 31, 61,
+   57,  60, 34, 43,
+   70,  95, 51, 56,
+  100, 135, 63, 71,
+  139, 165, 81, 87,
+  170, 185, 95,111,
+  199, 210,120,138,
+  227, 230,134,140,
+  255, 251,145,142};
+
+void setup() { 
+      // Uncomment/edit one of the following lines for your leds arrangement.
+      // FastLED.addLeds<TM1803, DATA_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<TM1804, DATA_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<TM1809, DATA_PIN, RGB>(leds, NUM_LEDS);
+       FastLED.addLeds<WS2811, DATA_PIN, BRG>(leds, NUM_LEDS);
+      // FastLED.addLeds<WS2812, DATA_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);
+      // FastLED.addLeds<APA104, DATA_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<UCS1903, DATA_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<UCS1903B, DATA_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<GW6205, DATA_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<GW6205_400, DATA_PIN, RGB>(leds, NUM_LEDS);
+      
+      // FastLED.addLeds<WS2801, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<SM16716, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<LPD8806, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<P9813, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<APA102, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<DOTSTAR, RGB>(leds, NUM_LEDS);
+
+      // FastLED.addLeds<WS2801, DATA_PIN, CLOCK_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<SM16716, DATA_PIN, CLOCK_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<LPD8806, DATA_PIN, CLOCK_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<P9813, DATA_PIN, CLOCK_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<APA102, DATA_PIN, CLOCK_PIN, RGB>(leds, NUM_LEDS);
+      // FastLED.addLeds<DOTSTAR, DATA_PIN, CLOCK_PIN, RGB>(leds, NUM_LEDS);
+
+      FastLED.setBrightness( MIN_BRIGHTNESS_SUNRISE_SUNSET );
+
+      intervalSunriseSunset = sunriseSunsetLength * 60 / 240 * 1000;
+      intervalDaylight = daylightLength * 60 / 240 * 1000;
+      intervalNight = nightLength * 60 / 240 * 1000;
+
+      // include some helper for the debugging and color-defining process. Shorter times and a serial output.
+      #ifdef DEBUG = 1
+        intervalSunriseSunset = 100;
+        intervalDaylight = 100;
+        intervalNight = 100;
+        Serial.begin(9600);
+        delay(2000); //small delay to let the serial start correctly.
+        debugPrintStartup();
+      #endif
+
+      sunriseSunsetBrightness = MAX_BRIGHTNESS_SUNRISE_SUNSET - MIN_BRIGHTNESS_SUNRISE_SUNSET;
+      daylightBrightness = MAX_BRIGHTNESS - MAX_BRIGHTNESS_SUNRISE_SUNSET;
+      nightBrightness = MIN_BRIGHTNESS_SUNRISE_SUNSET - MIN_BRIGHTNESS;
+
+      // ISR to attach a button which will creat a thunderstorm in the evening.
+      pinMode(THUNDERSTORM_PIN, INPUT_PULLUP);
+      attachInterrupt(digitalPinToInterrupt(THUNDERSTORM_PIN), interruptFunctionThunderstorm, LOW);
+      pinMode(ETERNAL_PIN, INPUT_PULLUP);
+      attachInterrupt(digitalPinToInterrupt(ETERNAL_PIN), interruptFunctionEternal, LOW);
+      
+      delay(1000);
+      boolThunderstorm = false;
+      boolEternal = false;
+      pinMode(LED_THUNDERSTORM, OUTPUT);
+      pinMode(LED_ETERNAL, OUTPUT);
+
+      pinMode(WARMWHITE_PIN, OUTPUT);
+      lengthWarmwhite = 240 * cutoffWarmwhite;
+}
+
+void loop() { 
+
+  /*  loop() will loop through the functions sunrise(), daylight(), sunset() and night() to 
+   *  mimic aday. Each function sets the heatIndex for the next part of the day to the appropriate
+   *  value to ensure, that the if-statement is true. The indices for sunrise, daylight and night
+   *  have a range from 0 to 240, the index for sunset has a range from 241 to 1.
+   *  
+   *  Thunderstorm() replaces the sunset. It basically is a different sunset, which simulates a
+   *  thunderstorm.
+   */
+   
+  if (heatIndexSunrise < 241) {
+    sunrise();
+  }
+  else if (heatIndexDaylight < 241) {
+    daylight();
+  }
+  else if ( (boolThunderstorm == true) && (heatIndexSunset > 0 ) ) {
+    thunderstorm();
+  }
+  else if (heatIndexSunset > 0) {
+    sunset();
+  }
+  else if (heatIndexNight < 241) {
+    night();
+  }
+
+  FastLED.setBrightness(brightness);
+  FastLED.show();
+  
+  analogWrite(WARMWHITE_PIN, currentWarmwhite);
+}
+
+void thunderstorm() {
+
+  //current color palette
+  CRGBPalette16 myPal = palThunderstorm;
+
+  /*  insert lightnings after 40 % of thunderstrom sunset. 0.6 * 240 = 144
+   *  (intervalSunriseSunset / 2) makes it more often than a color change. However, 
+   *  the random number makes it less often.
+   *  By choosing this method, the lightning insertion seems more random.
+   */
+  if ((heatIndexSunset - 1) < 144) {
+    EVERY_N_MILLISECONDS(intervalSunriseSunset / 2) {
+      
+      CRGB currentColor = leds[0];
+      uint8_t currentBrightness = FastLED.getBrightness();
+
+      uint8_t randLightning = random(0,30);
+      #ifdef DEBUG
+        Serial.print("randLightning: ");
+        Serial.println(randLightning);
+      #endif
+      
+      if (randLightning < 3) {
+        for (int i = 0; i <= randLightning; i++) {
+          fill_solid(leds, NUM_LEDS, CRGB(255,255,255));
+          FastLED.setBrightness(255);
+          FastLED.show();
+          delay(random(40,100));
+          fill_solid(leds, NUM_LEDS, currentColor);
+          FastLED.setBrightness(currentBrightness);
+          FastLED.show();
+          delay(random(40,100));
+        }
+      }
+    }
+  }
+
+  // fill the entire strip with the current color
+  fill_solid(leds, NUM_LEDS, ColorFromPalette( myPal, (heatIndexSunset - 1)));
+
+  //calculate brightness
+  brightness = -(sunriseSunsetBrightness) * cos(M_PI / 480 * (heatIndexSunset - 1)) + MAX_BRIGHTNESS_SUNRISE_SUNSET;
+
+  //change color every n milliseconds (intervalSunriseSunset)
+  EVERY_N_MILLISECONDS(intervalSunriseSunset) {
+    // stop decrementing at 0, we don't want the colorchange on the end of the color palette.
+    if((heatIndexSunset - 1) > 0) {
+      heatIndexSunset--;
+
+      // Routine for the warmwhite LED strip.
+      if(heatIndexSunset > (240 - (lengthWarmwhite / 2))) {
+        currentWarmwhite = (((heatIndexSunset - (240 - (lengthWarmwhite / 2)))) / (lengthWarmwhite / 2) * (CHANGE_WARMWHITE - MIN_WARMWHITE)) + MIN_WARMWHITE;
+      }
+      else{
+        currentWarmwhite = MIN_WARMWHITE;
+      }
+    
+      #ifdef DEBUG
+        debugPrint();
+      #endif
+    }
+    else {
+      heatIndexSunset--;
+      heatIndexNight = 0;
+      boolThunderstorm = false;
+      digitalWrite(LED_THUNDERSTORM, boolThunderstorm);
+
+      #ifdef DEBUG
+        debugPrint();
+        fill_solid(leds, NUM_LEDS, CRGB(0,0,0));
+        FastLED.show();
+        delay(200);
+      #endif
+    }
+  }
+}
+
+void night() {
+
+  //current color palette
+  CRGBPalette16 myPal = palNight;
+
+  // fill the entire strip with the current color
+  fill_solid(leds, NUM_LEDS, ColorFromPalette( myPal, heatIndexNight));
+
+  //calculate brightness
+  brightness = (nightBrightness / 2) * cos(M_PI / 120 * heatIndexNight) + MIN_BRIGHTNESS + daylightBrightness / 2;
+
+  //change color every n milliseconds (intervalSunriseSunset)
+  EVERY_N_MILLISECONDS(intervalNight) {
+    // stop incrementing at 240, we don't want the colorchange on the end of the color palette.
+    if(heatIndexNight < 240) {
+      heatIndexNight++;
+
+      // Just to be safe: currentWarmwhite set to minimal warmwhite.
+      currentWarmwhite = MIN_WARMWHITE;
+      
+      #ifdef DEBUG
+        debugPrint();
+      #endif
+    }
+    else {
+      if (boolEternal == false) {
+        heatIndexNight++;
+        heatIndexSunrise = 0;
+      }
+      else {
+        heatIndexNight = 0;
+      }
+
+      #ifdef DEBUG
+        debugPrint();
+        fill_solid(leds, NUM_LEDS, CRGB(0,0,0));
+        FastLED.show();
+        delay(200);
+      #endif
+    }
+  }
+}
+
+void daylight() {
+
+  //current color palette
+  CRGBPalette16 myPal = palDaylight;
+
+  // fill the entire strip with the current color
+  fill_solid(leds, NUM_LEDS, ColorFromPalette( myPal, heatIndexDaylight));
+
+  //calculate brightness
+  brightness = -(daylightBrightness / 2) * cos(M_PI / 120 * heatIndexDaylight) + MAX_BRIGHTNESS_SUNRISE_SUNSET + daylightBrightness / 2;
+
+  //change color every n milliseconds (intervalNight)
+  EVERY_N_MILLISECONDS(intervalDaylight) {
+    // stop incrementing at 240, we don't want the colorchange on the end of the color palette.
+    if(heatIndexDaylight < 240) {
+      heatIndexDaylight++;
+
+      // Routine for the warmwhite LED strip
+      if(heatIndexDaylight < 120) {
+        currentWarmwhite = (heatIndexDaylight / 120 * (MAX_WARMWHITE - CHANGE_WARMWHITE)) + CHANGE_WARMWHITE;
+      }
+      else{
+        currentWarmwhite = (120 - (heatIndexDaylight - 120) / (MAX_WARMWHITE - CHANGE_WARMWHITE) * 255) + CHANGE_WARMWHITE;
+      }
+    
+      #ifdef DEBUG
+        debugPrint();
+      #endif
+    }
+    else {
+      if (boolEternal == false) {
+        heatIndexDaylight++;
+        heatIndexSunset = 241;
+      }
+      else {
+        heatIndexDaylight = 0;
+      }
+
+      #ifdef DEBUG
+        debugPrint();
+        fill_solid(leds, NUM_LEDS, CRGB(0,0,0));
+        FastLED.show();
+        delay(200);
+      #endif
+    }
+  }
+}
+
+void sunset() {
+
+  //current color palette
+  CRGBPalette16 myPal = palSunriseSunset;
+
+  // fill the entire strip with the current color
+  fill_solid(leds, NUM_LEDS, ColorFromPalette( myPal, (heatIndexSunset - 1)));
+
+  //calculate brightness
+  brightness = MIN_BRIGHTNESS_SUNRISE_SUNSET + ((sunriseSunsetBrightness) * (heatIndexSunset - 1) / 240);
+
+  //change color every n milliseconds (intervalSunriseSunset)
+  EVERY_N_MILLISECONDS(intervalSunriseSunset) {
+    // stop decrementing at 0, we don't want the colorchange on the end of the color palette.
+    if((heatIndexSunset - 1) > 0) {
+      heatIndexSunset--;
+
+      // Routine for the warmwhite LED strip.
+      if(heatIndexSunset > (240 - lengthWarmwhite)) {
+        currentWarmwhite = (((heatIndexSunset - (240 - lengthWarmwhite))) / lengthWarmwhite * (CHANGE_WARMWHITE - MIN_WARMWHITE)) + MIN_WARMWHITE;
+      }
+      else{
+        currentWarmwhite = MIN_WARMWHITE;
+      }
+    
+      #ifdef DEBUG
+        debugPrint();
+      #endif
+    }
+    else {
+      heatIndexSunset--;
+      heatIndexNight = 0;
+
+      #ifdef DEBUG
+        debugPrint();
+        fill_solid(leds, NUM_LEDS, CRGB(0,0,0));
+        FastLED.show();
+        delay(200);
+      #endif
+    }
+  }
+}
+
+void sunrise() {
+
+  CRGBPalette16 myPal = palSunriseSunset;
+  
+  // fill the entire strip with the current color
+  fill_solid(leds, NUM_LEDS, ColorFromPalette( myPal, heatIndexSunrise));
+
+  brightness = MIN_BRIGHTNESS_SUNRISE_SUNSET + ((sunriseSunsetBrightness)* heatIndexSunrise / 240);
+
+  // slowly increase the heat
+  EVERY_N_MILLISECONDS(intervalSunriseSunset) {
+    // stop incrementing at 240, we don't want the colorchange on the end of the color palette.
+    if(heatIndexSunrise < 240) {
+      heatIndexSunrise++;
+
+      // Routine for the warmwhite LED strip
+      if(heatIndexSunrise < (240 - lengthWarmwhite)) {
+        currentWarmwhite = (((heatIndexSunrise - (240 - lengthWarmwhite))) / lengthWarmwhite * (CHANGE_WARMWHITE - MIN_WARMWHITE)) + MIN_WARMWHITE;
+      }
+      else{
+        currentWarmwhite = MIN_WARMWHITE;
+      }
+      
+      #ifdef DEBUG
+        debugPrint();
+      #endif
+    }
+    else {
+      heatIndexSunrise++;
+      heatIndexDaylight = 0;
+
+      #ifdef DEBUG
+        debugPrint();
+        fill_solid(leds, NUM_LEDS, CRGB(0,0,0));
+        FastLED.show();
+        delay(200);
+      #endif
+    }
+  }
+}
+
+void interruptFunctionThunderstorm() {
+  boolThunderstorm = true;
+  digitalWrite(LED_THUNDERSTORM, boolThunderstorm);
+}
+
+void interruptFunctionEternal() {
+  boolEternal = !boolEternal;
+  digitalWrite(LED_ETERNAL, boolEternal);
+}
+
+void debugPrint() {
+  Serial.print("heatIndexSunrise: ");
+  Serial.print(heatIndexSunrise);
+  Serial.print(", heatIndexDaylight: ");
+  Serial.print(heatIndexDaylight);
+  Serial.print(", heatIndexSunset: ");
+  Serial.print(heatIndexSunset);
+  Serial.print(", heatIndexNight: ");
+  Serial.println(heatIndexNight);
+  Serial.print("boolThunderstorm: ");
+  Serial.print(boolThunderstorm);
+  Serial.print(", boolEternal: ");
+  Serial.println(boolEternal);
+  Serial.print("currentWarmwhite: ");
+  Serial.println(currentWarmwhite);
+}
+
+void debugPrintStartup() {
+  Serial.println("*** DEBUG is on ***");
+  Serial.print("MIN_BRIGHTNESS: ");
+  Serial.println(MIN_BRIGHTNESS); 
+  Serial.print("MIN_BRIGHTNESS_SUNRISE_SUNSET: ");
+  Serial.println(MIN_BRIGHTNESS_SUNRISE_SUNSET);
+  Serial.print("MAX_BRIGHTNESS_SUNRISE_SUNSET: ");
+  Serial.println(MAX_BRIGHTNESS_SUNRISE_SUNSET);
+  Serial.print("MAX_BRIGHTNESS: ");
+  Serial.println(MAX_BRIGHTNESS);
+  Serial.print("intervalSunriseSunset: ");
+  Serial.println(intervalSunriseSunset); 
+  Serial.print("intervalDaylight: ");
+  Serial.println(intervalDaylight);
+  Serial.print("intervalNight: ");
+  Serial.println(intervalNight);
+  Serial.println("***  Starting   ***");
+  delay(2000);
+}
