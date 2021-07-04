@@ -11,7 +11,7 @@
  */
 
 // How many leds in your strip?
-#define NUM_LEDS 48
+#define NUM_LEDS 81
 
 // For led chips like Neopixels, which have a data line, ground, and power, you just
 // need to define DATA_PIN.  For led chipsets that are SPI based (four wires - data, clock,
@@ -46,6 +46,10 @@ static uint8_t heatIndexNight = 0;
 
 #define THUNDERSTORM_PIN 2
 static boolean boolThunderstorm;
+
+// This interrupt is used to keep the scene in an eternal daylight or night loop.
+#define ETERNAL_PIN 3
+static boolean boolEternal;
 
 // Define the array of leds
 CRGB leds[NUM_LEDS];
@@ -138,7 +142,6 @@ void setup() {
       intervalSunriseSunset = sunriseSunsetLength * 60 / 240 * 1000;
       intervalDaylight = daylightLength * 60 / 240 * 1000;
       intervalNight = nightLength * 60 / 240 * 1000;
-      boolThunderstorm = false;
 
       // include some helper for the debugging and color-defining process. Shorter times and a serial output.
       #ifdef DEBUG = 1
@@ -157,6 +160,12 @@ void setup() {
       // ISR to attach a button which will creat a thunderstorm in the evening.
       pinMode(THUNDERSTORM_PIN, INPUT_PULLUP);
       attachInterrupt(digitalPinToInterrupt(THUNDERSTORM_PIN), interruptFunctionThunderstorm, LOW);
+      pinMode(ETERNAL_PIN, INPUT_PULLUP);
+      attachInterrupt(digitalPinToInterrupt(ETERNAL_PIN), interruptFunctionEternal, LOW);
+      
+      delay(1000);
+      boolThunderstorm = false;
+      boolEternal = false;
 }
 
 void loop() { 
@@ -280,8 +289,13 @@ void night() {
       #endif
     }
     else {
-      heatIndexNight++;
-      heatIndexSunrise = 0;
+      if (boolEternal == false) {
+        heatIndexNight++;
+        heatIndexSunrise = 0;
+      }
+      else {
+        heatIndexNight = 0;
+      }
 
       #ifdef DEBUG
         debugPrint();
@@ -315,8 +329,13 @@ void daylight() {
       #endif
     }
     else {
-      heatIndexDaylight++;
-      heatIndexSunset = 241;
+      if (boolEternal == false) {
+        heatIndexDaylight++;
+        heatIndexSunset = 241;
+      }
+      else {
+        heatIndexDaylight = 0;
+      }
 
       #ifdef DEBUG
         debugPrint();
@@ -400,6 +419,10 @@ void interruptFunctionThunderstorm() {
   boolThunderstorm = true;
 }
 
+void interruptFunctionEternal() {
+  boolEternal = !boolEternal;
+}
+
 void debugPrint() {
   Serial.print("heatIndexSunrise: ");
   Serial.print(heatIndexSunrise);
@@ -410,7 +433,9 @@ void debugPrint() {
   Serial.print(", heatIndexNight: ");
   Serial.println(heatIndexNight);
   Serial.print("boolThunderstorm: ");
-  Serial.println(boolThunderstorm);
+  Serial.print(boolThunderstorm);
+  Serial.print(", boolEternal: ");
+  Serial.println(boolEternal);
 }
 
 void debugPrintStartup() {
